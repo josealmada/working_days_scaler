@@ -1,4 +1,5 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::compile_protos("proto/payments.proto")?;
+    std::env::set_var("PROTOC", "C:\\protoc\\bin\\protoc");
+    tonic_build::compile_protos("proto/externalscaler.proto")?;
     Ok(())
 }
