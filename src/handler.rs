@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{NaiveTime, Utc};
 use tonic::{Request, Response, Status};
 
 use crate::WorkingDays;
@@ -18,10 +18,16 @@ impl external_scaler_server::ExternalScaler for GrpcHandler {
     ) -> Result<Response<IsActiveResponse>, Status> {
         let message = request.into_inner();
         let expected_nth_working_day: u8 = read_nth_working_day_arg(&message)?;
+        let from_time = read_time(&message, "from_time")?;
+        let to_time = read_time(&message, "to_time")?;
+
+        read_target_size(&message)?; // Checking if present to avoid later errors
+
         let nth_working_day = current_nth_working_day(&self.working_days)?;
 
         Ok(Response::new(IsActiveResponse {
-            result: expected_nth_working_day == nth_working_day,
+            result: expected_nth_working_day == nth_working_day
+                && current_time_between(&self.working_days, from_time, to_time),
         }))
     }
 
@@ -79,6 +85,26 @@ fn read_nth_working_day_arg(message: &ScaledObjectRef) -> Result<u8, Status> {
     }
 }
 
+fn read_time(message: &ScaledObjectRef, parameter: &str) -> Result<NaiveTime, Status> {
+    let value = message.scaler_metadata.get(parameter);
+    match value {
+        None => Err(Status::invalid_argument(format!(
+            "Missing required metadata `{}`.",
+            parameter
+        ))),
+        Some(value) => {
+            if let Ok(parsed) = NaiveTime::parse_from_str(value, "%H:%M:%S") {
+                Ok(parsed)
+            } else {
+                Err(Status::invalid_argument(format!(
+                    "Metadata `{}` should be an time formatted as `%H:%M:%S`.",
+                    parameter
+                )))
+            }
+        }
+    }
+}
+
 fn read_target_size(message: &ScaledObjectRef) -> Result<u32, Status> {
     let value = message.scaler_metadata.get("target_size");
     match value {
@@ -101,6 +127,12 @@ fn current_nth_working_day(working_days: &WorkingDays) -> Result<u8, Status> {
     let now = Utc::now().with_timezone(&working_days.time_offset);
     let result = working_days.working_days_mtd(now.date());
     result.map_err(|err| Status::invalid_argument(err.to_string()))
+}
+
+fn current_time_between(working_days: &WorkingDays, from: NaiveTime, to: NaiveTime) -> bool {
+    let time = Utc::now().with_timezone(&working_days.time_offset).time();
+
+    from <= time && time <= to
 }
 
 #[cfg(test)]
@@ -175,6 +207,29 @@ mod tests {
             working_days: simple_working_days(),
         };
 
+        let mut metadata: HashMap<String, String> = HashMap::new();
+        metadata.insert("nth_working_day".to_string(), "5".to_string());
+        metadata.insert("from_time".to_string(), "06:00:00".to_string());
+        metadata.insert("to_time".to_string(), "18:00:00".to_string());
+
+        let result = handler
+            .is_active(Request::new(ScaledObjectRef {
+                name: "name".to_string(),
+                namespace: "namespace".to_string(),
+                scaler_metadata: metadata,
+            }))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().message().to_string(),
+            "Missing required metadata `target_size`."
+        );
+
+        let handler = GrpcHandler {
+            working_days: simple_working_days(),
+        };
+
         let result = handler
             .get_metric_spec(Request::new(ScaledObjectRef {
                 name: "name".to_string(),
@@ -212,6 +267,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn should_require_valid_from_date_and_to_date() {
+        let handler = GrpcHandler {
+            working_days: simple_working_days(),
+        };
+
+        let mut metadata: HashMap<String, String> = HashMap::new();
+        metadata.insert("nth_working_day".to_string(), "5".to_string());
+
+        let result = handler
+            .is_active(Request::new(ScaledObjectRef {
+                name: "name".to_string(),
+                namespace: "namespace".to_string(),
+                scaler_metadata: metadata,
+            }))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().message().to_string(),
+            "Missing required metadata `from_time`."
+        );
+
+        let mut metadata: HashMap<String, String> = HashMap::new();
+        metadata.insert("nth_working_day".to_string(), "5".to_string());
+        metadata.insert("from_time".to_string(), "06:00:00".to_string());
+
+        let result = handler
+            .is_active(Request::new(ScaledObjectRef {
+                name: "name".to_string(),
+                namespace: "namespace".to_string(),
+                scaler_metadata: metadata,
+            }))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().message().to_string(),
+            "Missing required metadata `to_time`."
+        );
+
+        let mut metadata: HashMap<String, String> = HashMap::new();
+        metadata.insert("nth_working_day".to_string(), "5".to_string());
+        metadata.insert("from_time".to_string(), "06:00:00".to_string());
+        metadata.insert("to_time".to_string(), "00:00".to_string());
+
+        let result = handler
+            .is_active(Request::new(ScaledObjectRef {
+                name: "name".to_string(),
+                namespace: "namespace".to_string(),
+                scaler_metadata: metadata,
+            }))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().message().to_string(),
+            "Metadata `to_time` should be an time formatted as `%H:%M:%S`."
+        );
+    }
+
+    #[tokio::test]
     async fn should_return_error_if_today_is_out_of_range() {
         let handler = GrpcHandler {
             working_days: out_of_range_working_days(),
@@ -219,6 +335,9 @@ mod tests {
 
         let mut metadata: HashMap<String, String> = HashMap::new();
         metadata.insert("nth_working_day".to_string(), "5".to_string());
+        metadata.insert("from_time".to_string(), "06:00:00".to_string());
+        metadata.insert("to_time".to_string(), "18:00:00".to_string());
+        metadata.insert("target_size".to_string(), "10".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -250,6 +369,8 @@ mod tests {
 
         let mut metadata: HashMap<String, String> = HashMap::new();
         metadata.insert("nth_working_day".to_string(), "5".to_string());
+        metadata.insert("from_time".to_string(), "06:00:00".to_string());
+        metadata.insert("to_time".to_string(), "18:00:00".to_string());
         metadata.insert("target_size".to_string(), "10".to_string());
 
         let result = handler

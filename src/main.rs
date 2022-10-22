@@ -17,14 +17,14 @@ mod working_days;
 #[command(version = "1.0")]
 #[command(about = "External scaler for KEDA", long_about = None)]
 pub struct Args {
-    // Path to the CSV with holidays.
+    /// Path to the CSV with holidays.
     #[arg(long, default_value_t = String::from("holidays.csv"))]
     holidays_file: String,
-    // The port that the gRPC server will listen.
+    /// The port that the gRPC server will listen.
     #[arg(short, long, default_value_t = 8080)]
     port: u16,
-    // The time offset in seconds. Value between -86400 and -86400.
-    #[arg(short, long, default_value_t = 0)]
+    /// The time offset in seconds. Value between -86400 and -86400.
+    #[arg(short, long, allow_negative_numbers = true, default_value_t = 0)]
     time_offset: i32,
 }
 
