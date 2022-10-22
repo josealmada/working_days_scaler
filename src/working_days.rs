@@ -14,7 +14,7 @@ pub struct WorkingDays {
     data: Vec<u8>,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum WorkingDaysError {
     #[error("The holiday list is empty. Its also used to infer witch years to process.")]
     EmptyHolidayList,
