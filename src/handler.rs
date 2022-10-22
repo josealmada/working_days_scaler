@@ -18,8 +18,8 @@ impl external_scaler_server::ExternalScaler for GrpcHandler {
     ) -> Result<Response<IsActiveResponse>, Status> {
         let message = request.into_inner();
         let expected_nth_working_day: u8 = read_nth_working_day_arg(&message)?;
-        let from_time = read_time(&message, "from_time")?;
-        let to_time = read_time(&message, "to_time")?;
+        let from_time = read_time(&message, "fromTime")?;
+        let to_time = read_time(&message, "toTime")?;
 
         read_target_size(&message)?; // Checking if present to avoid later errors
 
@@ -40,7 +40,7 @@ impl external_scaler_server::ExternalScaler for GrpcHandler {
 
         Ok(Response::new(GetMetricSpecResponse {
             metric_specs: vec![MetricSpec {
-                metric_name: "nth_working_day".to_string(),
+                metric_name: "nthWorkingDay".to_string(),
                 target_size: target_size as i64,
             }],
         }))
@@ -62,10 +62,10 @@ impl external_scaler_server::ExternalScaler for GrpcHandler {
 }
 
 fn read_nth_working_day_arg(message: &ScaledObjectRef) -> Result<u8, Status> {
-    let value = message.scaler_metadata.get("nth_working_day");
+    let value = message.scaler_metadata.get("nthWorkingDay");
     match value {
         None => Err(Status::invalid_argument(
-            "Missing required metadata `nth_working_day`.",
+            "Missing required metadata `nthWorkingDay`.",
         )),
         Some(value) => {
             if let Ok(parsed) = value.parse::<u8>() {
@@ -73,12 +73,12 @@ fn read_nth_working_day_arg(message: &ScaledObjectRef) -> Result<u8, Status> {
                     Ok(parsed)
                 } else {
                     Err(Status::invalid_argument(
-                        "Metadata `nth_working_day` should be a value between 1 and 31.",
+                        "Metadata `nthWorkingDay` should be a value between 1 and 31.",
                     ))
                 }
             } else {
                 Err(Status::invalid_argument(
-                    "Metadata `nth_working_day` should be a value between 1 and 31.",
+                    "Metadata `nthWorkingDay` should be a value between 1 and 31.",
                 ))
             }
         }
@@ -106,17 +106,17 @@ fn read_time(message: &ScaledObjectRef, parameter: &str) -> Result<NaiveTime, St
 }
 
 fn read_target_size(message: &ScaledObjectRef) -> Result<u32, Status> {
-    let value = message.scaler_metadata.get("target_size");
+    let value = message.scaler_metadata.get("targetSize");
     match value {
         None => Err(Status::invalid_argument(
-            "Missing required metadata `target_size`.",
+            "Missing required metadata `targetSize`.",
         )),
         Some(value) => {
             if let Ok(parsed) = value.parse::<u32>() {
                 Ok(parsed)
             } else {
                 Err(Status::invalid_argument(
-                    "Metadata `target_size` should be an integer value.",
+                    "Metadata `targetSize` should be an integer value.",
                 ))
             }
         }
@@ -163,11 +163,11 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Missing required metadata `nth_working_day`."
+            "Missing required metadata `nthWorkingDay`."
         );
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "jose".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "jose".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -180,11 +180,11 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Metadata `nth_working_day` should be a value between 1 and 31."
+            "Metadata `nthWorkingDay` should be a value between 1 and 31."
         );
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "32".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "32".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -197,7 +197,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Metadata `nth_working_day` should be a value between 1 and 31."
+            "Metadata `nthWorkingDay` should be a value between 1 and 31."
         );
     }
 
@@ -208,9 +208,9 @@ mod tests {
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "5".to_string());
-        metadata.insert("from_time".to_string(), "06:00:00".to_string());
-        metadata.insert("to_time".to_string(), "18:00:00".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "5".to_string());
+        metadata.insert("fromTime".to_string(), "06:00:00".to_string());
+        metadata.insert("toTime".to_string(), "18:00:00".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -223,7 +223,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Missing required metadata `target_size`."
+            "Missing required metadata `targetSize`."
         );
 
         let handler = GrpcHandler {
@@ -241,7 +241,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Missing required metadata `target_size`."
+            "Missing required metadata `targetSize`."
         );
 
         let handler = GrpcHandler {
@@ -249,7 +249,7 @@ mod tests {
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("target_size".to_string(), "jose".to_string());
+        metadata.insert("targetSize".to_string(), "jose".to_string());
 
         let result = handler
             .get_metric_spec(Request::new(ScaledObjectRef {
@@ -262,7 +262,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Metadata `target_size` should be an integer value."
+            "Metadata `targetSize` should be an integer value."
         );
     }
 
@@ -273,7 +273,7 @@ mod tests {
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "5".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "5".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -286,12 +286,12 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Missing required metadata `from_time`."
+            "Missing required metadata `fromTime`."
         );
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "5".to_string());
-        metadata.insert("from_time".to_string(), "06:00:00".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "5".to_string());
+        metadata.insert("fromTime".to_string(), "06:00:00".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -304,13 +304,13 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Missing required metadata `to_time`."
+            "Missing required metadata `toTime`."
         );
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "5".to_string());
-        metadata.insert("from_time".to_string(), "06:00:00".to_string());
-        metadata.insert("to_time".to_string(), "00:00".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "5".to_string());
+        metadata.insert("fromTime".to_string(), "06:00:00".to_string());
+        metadata.insert("toTime".to_string(), "00:00".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -323,7 +323,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message().to_string(),
-            "Metadata `to_time` should be an time formatted as `%H:%M:%S`."
+            "Metadata `toTime` should be an time formatted as `%H:%M:%S`."
         );
     }
 
@@ -334,10 +334,10 @@ mod tests {
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "5".to_string());
-        metadata.insert("from_time".to_string(), "06:00:00".to_string());
-        metadata.insert("to_time".to_string(), "18:00:00".to_string());
-        metadata.insert("target_size".to_string(), "10".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "5".to_string());
+        metadata.insert("fromTime".to_string(), "06:00:00".to_string());
+        metadata.insert("toTime".to_string(), "18:00:00".to_string());
+        metadata.insert("targetSize".to_string(), "10".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
@@ -368,10 +368,10 @@ mod tests {
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("nth_working_day".to_string(), "5".to_string());
-        metadata.insert("from_time".to_string(), "06:00:00".to_string());
-        metadata.insert("to_time".to_string(), "18:00:00".to_string());
-        metadata.insert("target_size".to_string(), "10".to_string());
+        metadata.insert("nthWorkingDay".to_string(), "5".to_string());
+        metadata.insert("fromTime".to_string(), "06:00:00".to_string());
+        metadata.insert("toTime".to_string(), "18:00:00".to_string());
+        metadata.insert("targetSize".to_string(), "10".to_string());
 
         let result = handler
             .is_active(Request::new(ScaledObjectRef {
