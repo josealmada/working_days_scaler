@@ -1,3 +1,3 @@
 #!/bin/bash
 
-apt install -y protobuf-compiler libprotobuf-dev
+apk add protoc protobuf-dev
