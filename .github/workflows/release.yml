@@ -16,14 +16,13 @@ jobs:
             archive: tar.gz tar.xz
 
     steps:
-      - name: Install protobuf
-        run: sudo apt install -y protobuf-compiler libprotobuf-dev
       - uses: actions/checkout@master
       - name: Compile and release
         uses: rust-build/rust-build.action@v1.3.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          PRE_BUILD: scripts/pre_build.sh
           RUSTTARGET: ${{ matrix.target }}
           ARCHIVE_TYPES: ${{ matrix.archive }}
-          EXTRA_FILES: "README.md holidays.csv"
+          EXTRA_FILES: "README.md LICENSE"
