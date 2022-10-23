@@ -1478,6 +1478,7 @@ dependencies = [
  "prost",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-build",
  "tracing",
