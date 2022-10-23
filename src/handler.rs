@@ -1,4 +1,9 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use chrono::{NaiveTime, Utc};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::WorkingDays;
@@ -7,7 +12,8 @@ tonic::include_proto!("externalscaler");
 
 #[derive(Debug)]
 pub struct GrpcHandler {
-    pub working_days: WorkingDays,
+    pub working_days: Arc<WorkingDays>,
+    pub push_interval: u64,
 }
 
 #[tonic::async_trait]
@@ -16,19 +22,33 @@ impl external_scaler_server::ExternalScaler for GrpcHandler {
         &self,
         request: Request<ScaledObjectRef>,
     ) -> Result<Response<IsActiveResponse>, Status> {
+        is_active(&self.working_days, request.into_inner())
+            .await
+            .map(Response::new)
+    }
+
+    type StreamIsActiveStream = ReceiverStream<Result<IsActiveResponse, Status>>;
+
+    async fn stream_is_active(
+        &self,
+        request: Request<ScaledObjectRef>,
+    ) -> Result<Response<Self::StreamIsActiveStream>, Status> {
+        let (tx, rx) = mpsc::channel(1);
+
+        let working_days = Arc::clone(&self.working_days);
+        let push_interval = Duration::from_secs(self.push_interval);
         let message = request.into_inner();
-        let expected_nth_working_day: u8 = read_nth_working_day_arg(&message)?;
-        let from_time = read_time(&message, "fromTime")?;
-        let to_time = read_time(&message, "toTime")?;
+        tokio::spawn(async move {
+            while !tx.is_closed() {
+                let result = is_active(&working_days, message.clone()).await;
 
-        read_target_size(&message)?; // Checking if present to avoid later errors
+                if (tx.send(result).await).is_ok() {
+                    tokio::time::sleep(push_interval).await
+                }
+            }
+        });
 
-        let nth_working_day = current_nth_working_day(&self.working_days)?;
-
-        Ok(Response::new(IsActiveResponse {
-            result: expected_nth_working_day == nth_working_day
-                && current_time_between(&self.working_days, from_time, to_time),
-        }))
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
     async fn get_metric_spec(
@@ -59,6 +79,24 @@ impl external_scaler_server::ExternalScaler for GrpcHandler {
             }],
         }))
     }
+}
+
+async fn is_active(
+    working_days: &WorkingDays,
+    message: ScaledObjectRef,
+) -> Result<IsActiveResponse, Status> {
+    let expected_nth_working_day: u8 = read_nth_working_day_arg(&message)?;
+    let from_time = read_time(&message, "fromTime")?;
+    let to_time = read_time(&message, "toTime")?;
+
+    read_target_size(&message)?; // Checking if present to avoid later errors
+
+    let nth_working_day = current_nth_working_day(working_days)?;
+
+    Ok(IsActiveResponse {
+        result: expected_nth_working_day == nth_working_day
+            && current_time_between(working_days, from_time, to_time),
+    })
 }
 
 fn read_nth_working_day_arg(message: &ScaledObjectRef) -> Result<u8, Status> {
@@ -138,6 +176,7 @@ fn current_time_between(working_days: &WorkingDays, from: NaiveTime, to: NaiveTi
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use chrono::{FixedOffset, TimeZone};
     use tonic::Request;
@@ -150,6 +189,7 @@ mod tests {
     async fn should_require_valid_nth_working_day_argument() {
         let handler = GrpcHandler {
             working_days: simple_working_days(),
+            push_interval: 60,
         };
 
         let result = handler
@@ -205,6 +245,7 @@ mod tests {
     async fn should_require_valid_target_size_argument() {
         let handler = GrpcHandler {
             working_days: simple_working_days(),
+            push_interval: 60,
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
@@ -228,6 +269,7 @@ mod tests {
 
         let handler = GrpcHandler {
             working_days: simple_working_days(),
+            push_interval: 60,
         };
 
         let result = handler
@@ -246,6 +288,7 @@ mod tests {
 
         let handler = GrpcHandler {
             working_days: simple_working_days(),
+            push_interval: 60,
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
@@ -270,6 +313,7 @@ mod tests {
     async fn should_require_valid_from_date_and_to_date() {
         let handler = GrpcHandler {
             working_days: simple_working_days(),
+            push_interval: 60,
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
@@ -331,6 +375,7 @@ mod tests {
     async fn should_return_error_if_today_is_out_of_range() {
         let handler = GrpcHandler {
             working_days: out_of_range_working_days(),
+            push_interval: 60,
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
@@ -365,6 +410,7 @@ mod tests {
     async fn should_execute_without_errors() {
         let handler = GrpcHandler {
             working_days: simple_working_days(),
+            push_interval: 60,
         };
 
         let mut metadata: HashMap<String, String> = HashMap::new();
@@ -403,23 +449,54 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    fn simple_working_days() -> WorkingDays {
+    #[tokio::test]
+    async fn should_execute_stream_without_errors() {
+        let handler = GrpcHandler {
+            working_days: simple_working_days(),
+            push_interval: 1,
+        };
+
+        let mut metadata: HashMap<String, String> = HashMap::new();
+        metadata.insert("nthWorkingDay".to_string(), "5".to_string());
+        metadata.insert("fromTime".to_string(), "06:00:00".to_string());
+        metadata.insert("toTime".to_string(), "18:00:00".to_string());
+        metadata.insert("targetSize".to_string(), "10".to_string());
+
+        let result = handler
+            .stream_is_active(Request::new(ScaledObjectRef {
+                name: "name".to_string(),
+                namespace: "namespace".to_string(),
+                scaler_metadata: metadata.clone(),
+            }))
+            .await;
+
+        assert!(result.is_ok());
+
+        let mut stream = result.unwrap().into_inner().into_inner();
+
+        assert!(stream.recv().await.unwrap().is_ok());
+        assert!(stream.recv().await.unwrap().is_ok());
+        assert!(stream.recv().await.unwrap().is_ok());
+        drop(stream);
+    }
+
+    fn simple_working_days() -> Arc<WorkingDays> {
         let mut holidays = Vec::new();
         let offset = FixedOffset::west(3 * 3600);
 
         holidays.push(offset.ymd(2022, 6, 5));
         holidays.push(offset.ymd(2122, 6, 5));
 
-        WorkingDays::build(offset, holidays).unwrap()
+        Arc::new(WorkingDays::build(offset, holidays).unwrap())
     }
 
-    fn out_of_range_working_days() -> WorkingDays {
+    fn out_of_range_working_days() -> Arc<WorkingDays> {
         let mut holidays = Vec::new();
         let offset = FixedOffset::west(3 * 3600);
 
         holidays.push(offset.ymd(2020, 6, 5));
         holidays.push(offset.ymd(2021, 6, 5));
 
-        WorkingDays::build(offset, holidays).unwrap()
+        Arc::new(WorkingDays::build(offset, holidays).unwrap())
     }
 }

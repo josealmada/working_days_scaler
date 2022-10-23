@@ -4,6 +4,7 @@ package externalscaler;
 
 service ExternalScaler {
   rpc IsActive(ScaledObjectRef) returns (IsActiveResponse) {}
+  rpc StreamIsActive(ScaledObjectRef) returns (stream IsActiveResponse) {}
   rpc GetMetricSpec(ScaledObjectRef) returns (GetMetricSpecResponse) {}
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
 }
